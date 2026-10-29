@@ -1,0 +1,6 @@
+{
+  "8.2.x": { "version": "8.2.8", "sourceRef": "8.2.8", "node": "16" },
+  "9.1.x": { "version": "9.1.5", "sourceRef": "9.1.5", "node": "20" },
+  "9.2.x": { "version": "9.2.0", "sourceRef": "9.2.0", "node": "20" },
+  "develop": { "version": "nightly", "sourceRef": null, "node": "20" }
+}

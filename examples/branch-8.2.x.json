@@ -1,0 +1,7 @@
+{
+  "$schema": "../manifest.schema.json",
+  "version": 0,
+  "prestashop": {
+    "ref": "8.2.x"
+  }
+}

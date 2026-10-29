@@ -1,0 +1,11 @@
+{
+  "$schema": "../manifest.schema.json",
+  "version": 0,
+  "prestashop": {
+    "ref": "develop"
+  },
+  "profile": "b2b",
+  "config": {
+    "PS_ORDER_OUT_OF_STOCK": "1"
+  }
+}

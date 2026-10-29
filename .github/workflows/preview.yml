@@ -1,0 +1,62 @@
+name: PrestaShop preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifests:
+        description: JSON list of manifest paths in this repository
+        default: '["examples/branch-8.2.x.json", "examples/pr-42938-qa-ko.json", "examples/develop-b2b.json"]'
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        manifest: ${{ fromJSON(inputs.manifests) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Launch the shop
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MANIFEST: ${{ matrix.manifest }}
+        run: bin/launch.sh "$MANIFEST" --out preview-out
+
+      - name: Check both offices answer
+        run: |
+          curl -fsS -o /dev/null -w 'front office %{http_code} in %{time_total}s\n' http://localhost:8000/
+          curl -s -o /dev/null -w 'back office %{http_code} in %{time_total}s\n' http://localhost:8000/admin-dev/index.php
+
+      - name: Summary
+        if: always()
+        env:
+          MANIFEST: ${{ matrix.manifest }}
+        run: |
+          {
+            echo "### $MANIFEST"
+            echo '```json'
+            jq . preview-out/launch.json 2>/dev/null || echo '{"status": "no report"}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Name the artifact
+        if: always()
+        id: artifact
+        env:
+          MANIFEST: ${{ matrix.manifest }}
+        run: echo "name=preview-$(basename "$MANIFEST" .json)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            preview-out/launch.json
+            preview-out/compose.yml
+            preview-out/*.log
+          if-no-files-found: ignore

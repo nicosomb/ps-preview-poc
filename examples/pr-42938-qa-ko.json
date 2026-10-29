@@ -1,0 +1,10 @@
+{
+  "$schema": "../manifest.schema.json",
+  "version": 0,
+  "prestashop": {
+    "ref": "pull/42938/head",
+    "commit": "fea11050b"
+  },
+  "php": "8.1",
+  "sql": ["../fixtures/second-customer-with-order.sql"]
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PrestaShop preview manifest, v0",
+  "description": "Describes the shop to start: which code, which PHP, which modules and which data. Inspired by WordPress Playground blueprints.",
+  "type": "object",
+  "required": ["version", "prestashop"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 0 },
+    "prestashop": {
+      "type": "object",
+      "description": "The code to run. At least one of ref and commit.",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "default": "PrestaShop/PrestaShop",
+          "description": "owner/name on GitHub"
+        },
+        "ref": {
+          "type": "string",
+          "description": "A branch (9.2.x), a tag (9.2.0) or a pull request head (pull/42938/head). Never falls back to another ref when it does not exist."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "Pins the exact commit. Takes precedence over ref, which then only documents where the commit comes from."
+        },
+        "base": {
+          "enum": ["8.2.x", "9.1.x", "9.2.x", "develop"],
+          "description": "The maintained branch the code belongs to, which picks the Flashlight image. Read from the pull request when ref is pull/N/head, from ref when it is a maintained branch."
+        }
+      },
+      "anyOf": [{ "required": ["ref"] }, { "required": ["commit"] }]
+    },
+    "php": {
+      "type": "string",
+      "pattern": "^[78]\\.[0-9]$",
+      "description": "PHP version. Defaults to the one the Flashlight image recommends for the base."
+    },
+    "debug": {
+      "type": "boolean",
+      "default": false,
+      "description": "PrestaShop debug mode (_PS_MODE_DEV_). Off by default: the vendor is installed without dev packages"
+    },
+    "profile": {
+      "enum": ["vanilla", "b2b"],
+      "default": "vanilla",
+      "description": "A predefined data set on top of the default seed (John DOE, 5 orders, demo catalog). multistore is not implemented in v0."
+    },
+    "modules": {
+      "type": "array",
+      "description": "Modules installed after the code overlay, in order.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "zip": { "type": "string", "format": "uri", "description": "A release zip, vendor included" },
+          "github": { "type": "string", "description": "owner/name, built from source with composer" },
+          "ref": { "type": "string", "description": "Branch, tag or commit for github" }
+        },
+        "oneOf": [{ "required": ["zip"] }, { "required": ["github", "ref"] }]
+      }
+    },
+    "config": {
+      "type": "object",
+      "description": "ps_configuration values, global scope. Applied after the profile.",
+      "additionalProperties": { "type": "string" }
+    },
+    "sql": {
+      "type": "array",
+      "description": "SQL files, relative to the manifest, run after the config. PREFIX_ is replaced by the table prefix.",
+      "items": { "type": "string" }
+    }
+  }
+}

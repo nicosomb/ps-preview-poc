@@ -59,4 +59,5 @@ jobs:
             preview-out/launch.json
             preview-out/compose.yml
             preview-out/*.log
+            preview-out/*.html
           if-no-files-found: ignore

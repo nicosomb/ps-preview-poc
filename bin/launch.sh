@@ -303,25 +303,32 @@ docker compose -f "$OUT/compose.yml" pull -q
 T_PULL=$(( $(now) - T ))
 T=$(now)
 docker compose -f "$OUT/compose.yml" up -d
-READY=false
+UP=false
 for _ in $(seq 1 300); do
   if ! docker compose -f "$OUT/compose.yml" ps --status running --services | grep -qx prestashop; then
     break
   fi
-  if curl -fsS -o /dev/null "http://localhost:$PORT/"; then READY=true; break; fi
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/")" != 000 ]; then UP=true; break; fi
   sleep 2
 done
 T_BOOT=$(( $(now) - T ))
 docker compose -f "$OUT/compose.yml" logs --no-color prestashop > "$OUT/prestashop.log" 2>&1 || true
-if ! $READY; then
+
+# An answer is not a shop: an error page is a 200 too. Each office must answer 200 with a full
+# HTML page, the back office after following its redirect to the login page.
+FO_STATUS=$(curl -s -o "$OUT/front-office.html" -w '%{http_code}' "http://localhost:$PORT/" || echo 000)
+BO_STATUS=$(curl -sL -o "$OUT/back-office.html" -w '%{http_code}' "http://localhost:$PORT/admin-dev/index.php" || echo 000)
+page_ok() { [ "$1" = 200 ] && [ "$(wc -c < "$2")" -gt 5000 ] && grep -qi '</html>' "$2"; }
+FO_OK=false; page_ok "$FO_STATUS" "$OUT/front-office.html" && FO_OK=true
+BO_OK=false; page_ok "$BO_STATUS" "$OUT/back-office.html" && BO_OK=true
+if ! $UP || ! $FO_OK || ! $BO_OK; then
+  docker compose -f "$OUT/compose.yml" exec -T prestashop sh -c \
+    'for f in "$PS_FOLDER"/var/logs/*.log; do [ -f "$f" ] && echo "== $f" && tail -n 60 "$f"; done' \
+    > "$OUT/php-errors.log" 2>&1 || true
   write_report failed
-  die "the shop never answered on http://localhost:$PORT/, see $OUT/prestashop.log"
+  $UP || die "the shop never answered on http://localhost:$PORT/, see $OUT/prestashop.log"
+  die "front office $FO_STATUS ($(wc -c < "$OUT/front-office.html") bytes), back office $BO_STATUS ($(wc -c < "$OUT/back-office.html") bytes): see $OUT/php-errors.log and the saved pages"
 fi
-BO_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/admin-dev/index.php")
-case "$BO_STATUS" in
-  200|302) ;;
-  *) write_report failed; die "the back office answered $BO_STATUS, see $OUT/prestashop.log" ;;
-esac
 write_report ready
 log "ready in $(( $(now) - T_START ))s: http://localhost:$PORT/ and http://localhost:$PORT/admin-dev/"
 cat "$OUT/launch.json"

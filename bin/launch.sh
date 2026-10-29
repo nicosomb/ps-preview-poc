@@ -315,10 +315,11 @@ T_BOOT=$(( $(now) - T ))
 docker compose -f "$OUT/compose.yml" logs --no-color prestashop > "$OUT/prestashop.log" 2>&1 || true
 
 # An answer is not a shop: an error page is a 200 too. Each office must answer 200 with a full
-# HTML page, the back office after following its redirect to the login page.
+# HTML page, the back office after following its redirect to the login page. </body> rather than
+# </html>: in debug mode the back office login page ends without the latter.
 FO_STATUS=$(curl -s -o "$OUT/front-office.html" -w '%{http_code}' "http://localhost:$PORT/" || echo 000)
 BO_STATUS=$(curl -sL -o "$OUT/back-office.html" -w '%{http_code}' "http://localhost:$PORT/admin-dev/index.php" || echo 000)
-page_ok() { [ "$1" = 200 ] && [ "$(wc -c < "$2")" -gt 5000 ] && grep -qi '</html>' "$2"; }
+page_ok() { [ "$1" = 200 ] && [ "$(wc -c < "$2")" -gt 5000 ] && grep -qi '</body>' "$2"; }
 FO_OK=false; page_ok "$FO_STATUS" "$OUT/front-office.html" && FO_OK=true
 BO_OK=false; page_ok "$BO_STATUS" "$OUT/back-office.html" && BO_OK=true
 if ! $UP || ! $FO_OK || ! $BO_OK; then

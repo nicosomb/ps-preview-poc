@@ -6,4 +6,3 @@ set -eu
 echo "composer.lock changed, installing the vendor"
 COMPOSER_ALLOW_SUPERUSER=1 composer install --working-dir="$PS_FOLDER" \
   --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
-chown -R www-data:www-data "$PS_FOLDER/vendor"

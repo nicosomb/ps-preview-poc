@@ -165,6 +165,23 @@ fi
 log "composer install: $COMPOSER_NEEDED, assets to build: ${ASSETS[*]:-none}, database schema differs from the image: $DB_DRIFT"
 $DB_DRIFT && log "warning: the image's database was installed from older SQL or entities; pages using the new schema may fail"
 
+# Files the started shop must hold exactly as the commit has them: the pull request's own files
+# first, then files that differ from the image, so the check fails if the overlay did not land.
+# Each line is the git blob id the commit expects, then the path.
+CODE_FILES=
+if [ -n "$PR_NUMBER" ]; then
+  CODE_FILES=$(github_api "repos/$REPO/pulls/$PR_NUMBER/files?per_page=100" | jq -r '.[] | select(.status != "removed") | .filename')
+fi
+CODE_FILES=$(printf '%s\n%s\n' "$CODE_FILES" "$(git -C "$SRC" diff --name-only "$IMAGE_SHA" "$SHA" -- '*.php')" \
+  | grep -E '\.(php|tpl|twig|js|yml)$' | grep -vE '^(tests|install-dev|\.github)/' | awk 'NF && !seen[$0]++' | head -5 || true)
+[ -n "$CODE_FILES" ] || CODE_FILES=$(printf '%s\n' app/AppKernel.php classes/Tools.php composer.json)
+: > "$OUT/code-check.txt"
+while read -r path; do
+  id=$(object_id "$SHA" "$path")
+  [ "$id" = missing ] || echo "$id $path" >> "$OUT/code-check.txt"
+done <<<"$CODE_FILES"
+log "code check: $(wc -l < "$OUT/code-check.txt" | tr -d ' ') files to find in the shop exactly as in ${SHA:0:9}"
+
 # 4. The overlay: the tracked files of the code under test, minus what a shop never serves.
 T=$(now)
 OVERLAY=$OUT/overlay
@@ -275,6 +292,7 @@ write_report() {
     --arg image "$IMAGE" --arg imageSha "$IMAGE_SHA" --argjson imageSizeMb "$IMAGE_SIZE_MB" \
     --argjson composer "$COMPOSER_NEEDED" --arg assets "${ASSETS[*]:-}" --argjson dbDrift "$DB_DRIFT" \
     --arg dbDriftFiles "$DB_DRIFT_FILES" \
+    --arg codeFiles "$(cut -d' ' -f2- "$OUT/code-check.txt")" --arg codeMatched "${CODE_MATCHED:-}" \
     --arg profile "$PROFILE" --argjson dryRun "$DRY_RUN" --arg status "$1" \
     --argjson resolve "$T_RESOLVE" --argjson overlay "$T_OVERLAY" --argjson assetsTime "$T_ASSETS" \
     --argjson pull "${T_PULL:-0}" --argjson boot "${T_BOOT:-0}" --argjson total "$(( $(now) - T_START ))" \
@@ -284,6 +302,8 @@ write_report() {
       image: {name: $image, builtFrom: $imageSha, sizeMb: $imageSizeMb},
       rebuilt: {composer: $composer, assets: ($assets | split(" ") | map(select(. != ""))),
         databaseSchemaDiffers: $dbDrift, schemaFilesChanged: ($dbDriftFiles | split("\n") | map(select(. != "")))},
+      codeCheck: {files: ($codeFiles | split("\n") | map(select(. != ""))),
+        matched: (if $codeMatched == "" then null else ($codeMatched | tonumber) end)},
       profile: $profile,
       secondsTaken: {resolve: $resolve, overlay: $overlay, assets: $assetsTime, pull: $pull, boot: $boot, total: $total},
       urls: {frontOffice: $fo, backOffice: $bo},
@@ -330,6 +350,25 @@ if ! $UP || ! $FO_OK || ! $BO_OK; then
   $UP || die "the shop never answered on http://localhost:$PORT/, see $OUT/prestashop.log"
   die "front office $FO_STATUS ($(wc -c < "$OUT/front-office.html") bytes), back office $BO_STATUS ($(wc -c < "$OUT/back-office.html") bytes): see $OUT/php-errors.log and the saved pages"
 fi
+
+# The code served is the commit's: hash each listed file inside the container the way git does.
+# The container is new, so no opcache can serve an older copy of a file that matches on disk.
+# shellcheck disable=SC2016
+docker compose -f "$OUT/compose.yml" exec -T prestashop php -r '
+  $root = getenv("PS_FOLDER") ?: "/var/www/html";
+  while (($line = fgets(STDIN)) !== false) {
+    [$id, $path] = explode(" ", trim($line), 2);
+    $content = @file_get_contents("$root/$path");
+    $got = $content === false ? "missing" : sha1("blob " . strlen($content) . "\0" . $content);
+    echo ($got === $id ? "match" : "MISMATCH") . " $path\n";
+  }' < "$OUT/code-check.txt" > "$OUT/code-check.result" 2>&1 || true
+CODE_CHECKED=$(wc -l < "$OUT/code-check.txt" | tr -d ' ')
+CODE_MATCHED=$(grep -c '^match ' "$OUT/code-check.result" || true)
+if [ "$CODE_MATCHED" != "$CODE_CHECKED" ]; then
+  write_report failed
+  die "the shop does not serve ${SHA:0:9}: $CODE_MATCHED of $CODE_CHECKED files match, see $OUT/code-check.result"
+fi
+log "code check: the $CODE_CHECKED files match ${SHA:0:9}"
 write_report ready
 log "ready in $(( $(now) - T_START ))s: http://localhost:$PORT/ and http://localhost:$PORT/admin-dev/"
 cat "$OUT/launch.json"

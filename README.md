@@ -63,15 +63,24 @@ docker compose -f preview-out/compose.yml down -v
 
 On GitHub Actions, [.github/workflows/preview.yml](.github/workflows/preview.yml) launches a list of manifests in parallel and puts each `launch.json` in the run summary.
 
-## Dry-run results, 2026-10-29
+## Results on GitHub Actions, 2026-10-29
 
-| Manifest | Commit | Image | composer | Assets to build | Schema |
-| --- | --- | --- | --- | --- | --- |
-| `branch-8.2.x` | `d99c905` | `8.2.8-nginx` | yes | none | same |
-| `pr-42938-qa-ko` | `fea1105` | `9.2.0-8.1-nginx` | yes | admin-new-theme | `db_structure.sql` +1 -1 (a column default) |
-| `develop-b2b` | `3e420b5` | `nightly-nginx` | no | none | same |
+`ubuntu-latest` runners, the three manifests in parallel ([run 40915932321](https://github.com/nicosomb/ps-preview-poc/actions/runs/40915932321)). Seconds, as written in `launch.json`. "Job" is the whole GitHub job, checkout included.
 
-Not measured yet: the timings of the real launch (image pull, composer, asset build, boot), which need a Docker host.
+| Manifest | Image | Rebuilt | Resolve | Assets | Pull | Boot | **Ready in** | Job |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `branch-8.2.x` | `8.2.8-nginx` | composer | 3 | 0 | 11 | 29 | **49** | 56 |
+| `develop-b2b` | `nightly-nginx` | nothing | 4 | 0 | 11 | 25 | **51** | 58 |
+| `pr-42938-qa-ko` | `9.2.0-8.1-nginx` | composer, admin-new-theme | 5 | 67 | 13 | 48 | **141** | 147 |
+
+All three under the 5-minute target. "Ready" means both offices answer 200 with a full page (front office home, back office login page), not only that the server answers.
+
+What the runs taught, and what was fixed on the way:
+
+- **An answer is not a shop.** The first run declared the PR shop ready on a 982-byte fatal error page. The check now requires a full HTML page from both offices, saves both pages, and collects `var/logs` when it fails.
+- **composer reinstalls the native modules and themes as root.** PHP then could not write to `themes/hummingbird/assets/cache` (front office fatal) nor update `modules/productcomments` (back office 500). The whole folder is now handed back to `www-data` at the end of the init.
+- **The asset build is the cost.** 67 to 83 s for `admin-new-theme` alone, half of the PR's launch. A PR that only touches PHP skips it.
+- **The image choice matters more than expected.** develop on `nightly` rebuilds nothing; 9.2.x on `9.2.0` rebuilds composer and the admin theme, because the branch has moved since the release. A nightly image per maintained branch would bring every launch close to 50 s.
 
 ## Known limits of v0
 
@@ -80,3 +89,5 @@ Not measured yet: the timings of the real launch (image pull, composer, asset bu
 - No `multistore` profile yet.
 - The asset build uses node 16 for 8.2.x and 20 otherwise, an assumption to confirm per branch.
 - Each run is a fresh pair of containers: nothing is shared between runs, and no secret is passed to the shop.
+- Not verified yet: that the served code is the overlaid commit (a canary such as a string the PR adds), and the data the manifest applies (its SQL ran without error, the rows were not read back). Both belong to the agent step, which reads the shop anyway.
+- The shop only lives as long as the job: an agent has to run in the same job, or the shop needs a tunnel to be reached from outside.

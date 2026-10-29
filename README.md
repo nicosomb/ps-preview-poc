@@ -16,6 +16,7 @@ Installing PrestaShop from scratch takes minutes: `composer install`, the asset 
    - the SQL structure, the upgrade scripts or the Doctrine entities differ: a warning, with the files, in the report
 4. **Overlay** the tracked files of the commit on the image's code, then apply the manifest: modules, profile, configuration, SQL.
 5. **Wait** until the front office answers, and check the back office.
+6. **Check the code** the shop holds: up to five files, the pull request's own first, then files that differ from the image, are hashed inside the container the way git does and compared with the commit. The container is new, so no opcache can serve an older copy. A file that does not match fails the launch.
 
 Everything the run decided and how long each step took is written to `launch.json`.
 
@@ -75,6 +76,8 @@ On GitHub Actions, [.github/workflows/preview.yml](.github/workflows/preview.yml
 
 All three under the 5-minute target. "Ready" means both offices answer 200 with a full page (front office home, back office login page), not only that the server answers.
 
+Code check, [run 40917081921](https://github.com/nicosomb/ps-preview-poc/actions/runs/40917081921): every file matched its commit. For the pull request, the three files it changes (`CustomerThreadQueryBuilder`, `OrderQueryBuilder`, `OutstandingQueryBuilder`) are served exactly as in `fea11050b`; 3 files for 8.2.x, 2 for develop.
+
 What the runs taught, and what was fixed on the way:
 
 - **An answer is not a shop.** The first run declared the PR shop ready on a 982-byte fatal error page. The check now requires a full HTML page from both offices, saves both pages, and collects `var/logs` when it fails.
@@ -89,5 +92,5 @@ What the runs taught, and what was fixed on the way:
 - No `multistore` profile yet.
 - The asset build uses node 16 for 8.2.x and 20 otherwise, an assumption to confirm per branch.
 - Each run is a fresh pair of containers: nothing is shared between runs, and no secret is passed to the shop.
-- Not verified yet: that the served code is the overlaid commit (a canary such as a string the PR adds), and the data the manifest applies (its SQL ran without error, the rows were not read back). Both belong to the agent step, which reads the shop anyway.
+- Not verified yet: the data the manifest applies (its SQL ran without error, the rows were not read back). It belongs to the agent step, which reads the shop anyway.
 - The shop only lives as long as the job: an agent has to run in the same job, or the shop needs a tunnel to be reached from outside.

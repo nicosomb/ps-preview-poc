@@ -85,6 +85,17 @@ What the runs taught, and what was fixed on the way:
 - **The asset build is the cost.** 67 to 83 s for `admin-new-theme` alone, half of the PR's launch. A PR that only touches PHP skips it.
 - **The image choice matters more than expected.** develop on `nightly` rebuilds nothing; 9.2.x on `9.2.0` rebuilds composer and the admin theme, because the branch has moved since the release. A nightly image per maintained branch would bring every launch close to 50 s.
 
+## The QA agent on top
+
+[.github/workflows/qa.yml](.github/workflows/qa.yml) starts two shops side by side, the code before the fix on port 8000 and the pull request's code on port 8001, from the same image and the same data. It then runs the `prestashop-pr-qa` skill (PrestaShop/skills `main` with #6 merged) through Claude Code, unattended. The two shops replace the skill's two gates, where a developer would switch the code by hand. The prompt is written by [bin/qa-prompt.sh](bin/qa-prompt.sh): no question gets an answer, so what the agent could not verify goes in the report rather than being guessed. It reads only what a QA would read, never the pull request's comments, and posts nothing.
+
+The report, the video, the comment to paste, the agent's cost and turn count are uploaded as the `qa-pr-<number>` artifact.
+
+Needs a repository secret `ANTHROPIC_API_KEY`. Open security points before this runs on pull requests from forks:
+
+- The agent has a shell and the API key in its environment, and it reads text written by the pull request's author. A prompt injection in a pull request could try to make it leak the key. The shops never see the key: it is not passed to the containers.
+- The artifacts of a public repository are readable by any GitHub user. The video shows the back office login with Flashlight's public default credentials, nothing else secret, but a shop seeded with real data must never run here.
+
 ## Known limits of v0
 
 - Files deleted since the image's version stay in place.

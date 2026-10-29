@@ -253,8 +253,9 @@ for f in "$PREVIEW"/sql/*.sql; do
   sed 's/PREFIX_/ps_/g' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 done
 
+# One compose project per port, so two shops (before and after a fix) can run side by side.
 cat > "$OUT/compose.yml" <<EOF
-name: ps-preview
+name: ps-preview-$PORT
 services:
   mysql:
     image: mariadb:lts

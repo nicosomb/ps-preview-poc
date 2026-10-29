@@ -1,0 +1,100 @@
+name: PR QA
+
+# Starts two shops, the code before the fix and the pull request's code, then runs the
+# prestashop-pr-qa skill on them with Claude Code, unattended. Nothing is posted on GitHub:
+# the report, the video and the comment to paste are uploaded as an artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PrestaShop/PrestaShop pull request number
+        default: '42938'
+      before:
+        description: Manifest of the code before the fix
+        default: examples/pr-42938-before.json
+      after:
+        description: Manifest of the pull request's code
+        default: examples/pr-42938-qa-ko.json
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PR: ${{ inputs.pr }}
+      BEFORE_MANIFEST: ${{ inputs.before }}
+      AFTER_MANIFEST: ${{ inputs.after }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Launch both shops
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bin/launch.sh "$BEFORE_MANIFEST" --out before-out --port 8000 > before.log 2>&1 &
+          before_pid=$!
+          bin/launch.sh "$AFTER_MANIFEST" --out after-out --port 8001 > after.log 2>&1 &
+          after_pid=$!
+          before_status=0; wait "$before_pid" || before_status=$?
+          after_status=0; wait "$after_pid" || after_status=$?
+          echo "::group::before"; cat before.log; echo "::endgroup::"
+          echo "::group::after"; cat after.log; echo "::endgroup::"
+          [ "$before_status" = 0 ] && [ "$after_status" = 0 ]
+
+      - name: Install Claude Code and the skill
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          sudo npx -y playwright install-deps chromium > /dev/null
+          git clone -q https://github.com/PrestaShop/skills.git /tmp/skills
+          # The skill as updated by PrestaShop/skills#6, merged on main as on the maintainer's machine
+          git -C /tmp/skills fetch -q origin pull/6/head:pr-6
+          git -C /tmp/skills -c user.name=ci -c user.email=ci@localhost merge -q --no-edit pr-6
+          mkdir -p ~/.claude/skills
+          cp -r /tmp/skills/qa/dev/prestashop-pr-qa ~/.claude/skills/
+          echo "skills: $(git -C /tmp/skills rev-parse --short HEAD), claude $(claude --version)"
+
+      - name: Run the QA agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          QA_BO_EMAIL: admin@prestashop.com
+          QA_BO_PASSWORD: prestashop
+        run: |
+          bin/qa-prompt.sh "$PR" before-out after-out > prompt.md
+          start=$(date +%s)
+          claude -p "$(cat prompt.md)" --output-format json --max-turns 200 \
+            --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill" > agent.json || true
+          echo "agent took $(( $(date +%s) - start ))s"
+          jq '{subtype, is_error, num_turns, duration_ms, total_cost_usd, result}' agent.json || cat agent.json
+
+      - name: Summary
+        if: always()
+        run: |
+          RUN_DIR="$HOME/prestashop-pr-qa/PrestaShop/PrestaShop/pr-$PR"
+          {
+            echo "### PrestaShop/PrestaShop#$PR"
+            echo '```json'
+            jq '{verdict, caveat, why, notTested}' "$RUN_DIR/verdict.json" 2>/dev/null || echo '{"verdict": "none written"}'
+            jq '{num_turns, duration_ms, total_cost_usd}' agent.json 2>/dev/null || true
+            jq -s 'map({commit: .code.commit, ready: .secondsTaken.total})' before-out/launch.json after-out/launch.json 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cp -r "$RUN_DIR" qa-run 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-pr-${{ inputs.pr }}
+          path: |
+            qa-run/
+            agent.json
+            prompt.md
+            before.log
+            after.log
+            before-out/launch.json
+            after-out/launch.json
+          if-no-files-found: ignore
